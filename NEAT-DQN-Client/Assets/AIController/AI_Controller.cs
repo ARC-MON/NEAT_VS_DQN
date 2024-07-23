@@ -12,6 +12,7 @@ using Task = System.Threading.Tasks.Task;
 using UnityEditor.VersionControl;
 using Random = UnityEngine.Random;
 using System.Threading.Tasks;
+using System.Linq;
 
 public class AI_Controller : MonoBehaviour
 {
@@ -42,6 +43,10 @@ public class AI_Controller : MonoBehaviour
     private byte[] buffer = new byte[4096];
     private int bytesRead;
     private JObject masageFromServer;
+
+    //simulation only variables
+    bool doSimulation = true;
+    List<int> keysToRemove = new List<int>();
 
     //data of agents send to server
     public class agentData
@@ -119,7 +124,10 @@ public class AI_Controller : MonoBehaviour
 
     async public void startSimulation()
     {
-        sendResponseToServerSync("Start", _file.text, _dropdown.value);
+        if(_file.text == "")
+            sendResponseToServerSync("Start", null, _dropdown.value);
+        else
+            sendResponseToServerSync("Start", _file.text, _dropdown.value);
 
         Debug.Log("Simulation starting...");
 
@@ -201,42 +209,104 @@ public class AI_Controller : MonoBehaviour
     {
         Debug.Log("Starting NEAT");
 
-        masageFromServer = await receiveResponseFromServerAsync();
-
-        if ((string)masageFromServer["action"] == "SendData")
+        while (doSimulation)
         {
-            //getting data - change to method collecting data
-            foreach (var agent in agentsPositions)
-            {
-                agent.Value.reward = Random.Range(0, 11);
-            }
-            Debug.Log("Getting Data");
-
-            //send data
-            await sendAgentsDataToServer();
-            Debug.Log("Sending Data");
-
-            //wait for action
             masageFromServer = await receiveResponseFromServerAsync();
-            Debug.Log("Reciving Action");
-            Debug.Log("The actions: " + masageFromServer);
+            Debug.Log("Waiting for order");
 
-            //aply action
-            Debug.Log("Apply Action");
-
-            //get rewards
-            foreach (var agent in agentsPositions)
+            if ((string)masageFromServer["action"] == "SendData")
             {
-                agent.Value.reward = Random.Range(-10, 1);
+                //getting data - change to method collecting data
+                foreach (var agent in agentsPositions)
+                {
+                    agent.Value.reward = Random.Range(0, 11);
+                }
+                Debug.Log("Getting Data");
+
+                //send data
+                await sendAgentsDataToServer();
+                Debug.Log("Sending Data");
+
+                //wait for action
+                masageFromServer = await receiveResponseFromServerAsync();
+                Debug.Log($"{masageFromServer}");
+                Debug.Log("Reciving Action");
+                Debug.Log("The actions: " + masageFromServer);
+
+                //aply action
+                Debug.Log("Apply Action");
+
+                //get rewards
+                foreach (var agent in agentsPositions)
+                {
+                    agent.Value.reward = Random.Range(-10, 1);
+                    agent.Value.alive = Random.value < 0.75f;
+                }
+                Debug.Log("Getting rewards");
+
+                //confirm update with rewards
+                await sendAgentsDataToServer();
+                Debug.Log("Send revards");
+
+                //deliting dead agents
+
+                keysToRemove.Clear();
+
+                foreach (KeyValuePair<int, GameObject> pair in agents)
+                {
+                    if (agentsPositions[pair.Key].alive == false)
+                    {
+                        keysToRemove.Add(pair.Key);
+                    }
+                }
+
+                foreach (int key in keysToRemove)
+                {
+                    Destroy(agents[key]);
+                    agents.Remove(key);
+                    agentsPositions.Remove(key);
+                }
+
+                Debug.Log("Agents deleted");
+
+                //looking for next generation
+                masageFromServer = await receiveResponseFromServerAsync();
+                Debug.Log("If next generation");
+
+                if ((string)masageFromServer["action"] == "new_gen")
+                    break;
+
+                await sendResponseToServerAsync("We can continue");
+
+                //clearAgents();
+                //Debug.Log("Clearing simulation");
             }
-            Debug.Log("Getting rewards");
+        }
 
-            //confirm update with rewards
-            await sendAgentsDataToServer();
-            Debug.Log("Send revards");
+        if (doSimulation)
+        {
+            Debug.Log("New generation");
+            await sendResponseToServerAsync("We can do next generation");
+            makeNextGeneration();
+        }
+        else 
+        {
+            masageFromServer = await receiveResponseFromServerAsync();
+            sendResponseToServerSync("stop");
+            clearAgents();
+        }
+    }
+    async void makeNextGeneration()
+    {
+        masageFromServer = receiveResponseFromServerSync();
 
-            //clearAgents();
-            //Debug.Log("Clearing simulation");
+        if((string)masageFromServer["action"] == "create")
+        {
+            clearAgents();
+            createAgentsPrey((int)masageFromServer["number"]);
+            sendResponseToServerSync("AgentsCreated");
+
+            await runAI();
         }
     }
     public void clearAgents()
@@ -274,7 +344,7 @@ public class AI_Controller : MonoBehaviour
 
     public void stopSimulation()
     {
-        clearAgents();
+        doSimulation = false;
         Debug.Log("Simulation stoped");
 
         turnOffSimulation();
