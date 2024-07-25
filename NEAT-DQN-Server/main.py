@@ -1,12 +1,26 @@
 import socket
 import json
-import random
+import psutil
 import neat
 import os
 from datetime import datetime
 import pickle
 import copy
 from classes.agent import Agent
+from classes.ploter import cpuPloter, fitPloter, timePloter
+
+cpu_data = []
+memory_data = []
+avg_cpu_data = []
+avg_memory_data = []
+
+maxFit = []
+minFit = []
+avgFit = []
+
+maxTime = []
+minTime = []
+avgTime = []
 
 fitestNEATAgent = None
 bestNEATGeneration = 0
@@ -58,6 +72,11 @@ def start_server():
 
 
         print(f"Closing server")
+def monitor_resources(interval=0.1):
+    while True:
+        cpu = psutil.cpu_percent(interval=interval, percpu=True)
+        memory = psutil.virtual_memory().percent
+        yield cpu, memory
 def runDQN():
     global folderName
 
@@ -77,7 +96,16 @@ def runDQN():
 
     Agent.generation = 0
 
+    cpu_data.clear()
+    memory_data.clear()
+    avg_cpu_data.clear()
+    avg_memory_data.clear()
+
     while True:
+
+        resource_monitor = monitor_resources()
+        agentTimes = []
+
         Agent.generation += 1
         print(Agent.generation)
 
@@ -94,6 +122,11 @@ def runDQN():
         json_data = json.loads(data.decode('utf-8'))
         print(f"data send {json_data}")
 
+        if json_data.get("message") == 'stop':
+            DQNagents[0].saveModel(folderName)
+            saveDQN(folderName, Agent.generation)
+            raise StopIteration("Finished algorithm on demand")
+
         while True:
 
             print(f"Ask client for old state")
@@ -107,6 +140,7 @@ def runDQN():
 
             if json_data.get("message") == 'stop':
                 DQNagents[0].saveModel(folderName)
+                saveDQN(folderName, Agent.generation)
                 raise StopIteration("Finished algorithm on demand")
 
             print(f"Get action from data")
@@ -124,6 +158,11 @@ def runDQN():
             json_data = json.loads(data.decode('utf-8'))
             print(f"Agents rewards {json_data}")
 
+            if json_data.get("message") == 'stop':
+                DQNagents[0].saveModel(folderName)
+                saveDQN(folderName, Agent.generation)
+                raise StopIteration("Finished algorithm on demand")
+
             for key in agentsActions:
                 DQNagents[key].newState = [0, 0, 1] #popraw na pobierane z unity
                 DQNagents[key].done = not (json_data['0']['alive'])
@@ -139,6 +178,7 @@ def runDQN():
             for key in DQNagents:
                 if DQNagents[key].done == True:
                     agentsActions.pop(key)
+                    agentTimes.append()
 
             print(f"Testing if all agents are dead")
 
@@ -149,6 +189,12 @@ def runDQN():
                 data = conn.recv(4096)
                 json_data = json.loads(data.decode('utf-8'))
                 print(f"Returned info: {json_data}")
+
+                if json_data.get("message") == 'stop':
+                    DQNagents[0].saveModel(folderName)
+                    saveDQN(folderName, Agent.generation)
+                    raise StopIteration("Finished algorithm on demand")
+
                 break
             else:
                 response = json.dumps({"action": "continue"})
@@ -157,6 +203,11 @@ def runDQN():
                 data = conn.recv(4096)
                 json_data = json.loads(data.decode('utf-8'))
                 print(f"Returned info: {json_data}")
+
+                if json_data.get("message") == 'stop':
+                    DQNagents[0].saveModel(folderName)
+                    saveDQN(folderName, Agent.generation)
+                    raise StopIteration("Finished algorithm on demand")
 
         print(f"Long memory training")
         for key in DQNagents:
@@ -167,9 +218,15 @@ def runDQN():
         if (Agent.generation) % 50 == 0:
             DQNagents[0].saveModel(folderName)
 
+        cpu, memory = next(resource_monitor)
+        cpu_data.append(sum(cpu) / len(cpu))
+        memory_data.append(memory)
+        avg_cpu_data.append((sum(cpu_data) / len(cpu_data)))
+        avg_memory_data.append((sum(memory_data) / len(memory_data)))
 
-
-    pass
+        cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "DQN")
+        fitPloter(maxFit, minFit, avgFit, "", "DQN") # dokończyć
+        timePloter(maxTime, minTime, avgTime, "", "DQN") # dokończyć
 def runNEAT(config_file):
     global population, folderName
 
@@ -200,6 +257,19 @@ def runNEAT(config_file):
             population.population[genome_id].nodes = copy.deepcopy(trained_genome.nodes)
             population.population[genome_id].connections = copy.deepcopy(trained_genome.connections)
 
+    cpu_data.clear()
+    memory_data.clear()
+    avg_cpu_data.clear()
+    avg_memory_data.clear()
+
+    maxFit.clear()
+    minFit.clear()
+    avgFit.clear()
+
+    maxTime.clear()
+    minTime.clear()
+    avgTime.clear()
+
     try:
        population.run(fitnessNEAT)
     except StopIteration as e:
@@ -208,11 +278,18 @@ def runNEAT(config_file):
 def fitnessNEAT(genomes, config):
     global fitestNEATAgent, bestNEATGeneration
 
+    resource_monitor = monitor_resources()
+
     print(f"Create agents")
 
     agentsActions = {}
     a_genomes = {}
     nets = {}
+    agentTimes = []
+
+    bestTime = None
+    worstTime = None
+    meanTime = 0
 
     for i, (genome_id, genome) in enumerate(genomes):
         agentsActions[i] = 0
@@ -228,6 +305,9 @@ def fitnessNEAT(genomes, config):
     data = conn.recv(4096)
     json_data = json.loads(data.decode('utf-8'))
     print(f"data send {json_data}")
+
+    if json_data.get("message") == 'stop':
+        raise StopIteration("Finished algorithm on demand")
 
     while True:
         print(f"Ask client for state")
@@ -256,6 +336,9 @@ def fitnessNEAT(genomes, config):
         json_data = json.loads(data.decode('utf-8'))
         print(f"Agents rewards {json_data}")
 
+        if json_data.get("message") == 'stop':
+            raise StopIteration("Finished algorithm on demand")
+
         print(f"Setting fitness")
         for key in json_data:
             a_genomes[int(key)].fitness += json_data[key]['reward']
@@ -267,6 +350,8 @@ def fitnessNEAT(genomes, config):
                 a_genomes.pop(int(key))
                 nets.pop(int(key))
 
+                agentTimes.append(json_data[key]['lifeTime'])
+
         print(f"Testing if all agents are dead")
 
         if len(agentsActions) <= 0:
@@ -276,6 +361,10 @@ def fitnessNEAT(genomes, config):
             data = conn.recv(4096)
             json_data = json.loads(data.decode('utf-8'))
             print(f"Returned info: {json_data}")
+
+            if json_data.get("message") == 'stop':
+                raise StopIteration("Finished algorithm on demand")
+
             break
         else:
             response = json.dumps({"action": "continue"})
@@ -283,6 +372,12 @@ def fitnessNEAT(genomes, config):
             print(f"Waiting for ability to continue")
             data = conn.recv(4096)
             json_data = json.loads(data.decode('utf-8'))
+
+            print(f"I got times {json_data['time']} {json_data['totalTime']}")
+
+            if json_data.get("message") == 'stop':
+                raise StopIteration("Finished algorithm on demand")
+
             print(f"Returned info: {json_data}")
 
     bestNEATGeneration = (population.generation + 1)
@@ -299,6 +394,31 @@ def fitnessNEAT(genomes, config):
             fitestNEATAgent = genome
             most = genome.fitness
 
+    for i in nets:
+        agentTimes.append(json_data['time'])
+
+    meanTime = sum(agentTimes) / len(agentTimes)
+    bestTime = max(agentTimes)
+    worstTime = min(agentTimes)
+
+    maxFit.append(most)
+    minFit.append(least)
+    avgFit.append(avarage/len(genomes))
+
+    maxTime.append(bestTime)
+    minTime.append(worstTime)
+    avgTime.append(meanTime)
+
+    cpu, memory = next(resource_monitor)
+    cpu_data.append(sum(cpu) / len(cpu))
+    memory_data.append(memory)
+    avg_cpu_data.append((sum(cpu_data) / len(cpu_data)))
+    avg_memory_data.append((sum(memory_data) / len(memory_data)))
+
+    cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "NEAT")
+    fitPloter(maxFit, minFit, avgFit, "", "NEAT")
+    timePloter(maxTime, minTime, avgTime, "", "NEAT")
+
     if (population.generation+1) % 50 == 0 and fitestNEATAgent is not None:
         saveNEAT(folderName, bestNEATGeneration)
 def saveNEAT(folderName, generationNumber):
@@ -308,6 +428,17 @@ def saveNEAT(folderName, generationNumber):
     full_path2 = os.path.join(full_path, f'NEAT_Model_Generation{generationNumber}.pkl')
     with open(full_path2, 'wb') as f:
         pickle.dump(fitestNEATAgent, f)
+
+    cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, full_path, "NEAT")
+    fitPloter(maxFit, minFit, avgFit, full_path, "NEAT")
+    timePloter(maxTime, minTime, avgTime, full_path, "NEAT")
+def saveDQN(folderName, generations):
+    full_path = os.path.join(folderName, f"Generation_{generations}")
+    os.makedirs(f"{full_path}", exist_ok=True)
+
+    cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, full_path, "DQN")
+    fitPloter(maxFit, minFit, avgFit, full_path, "DQN")
+    timePloter(maxTime, minTime, avgTime, full_path, "DQN")
 
 
 

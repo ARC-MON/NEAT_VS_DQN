@@ -48,11 +48,26 @@ public class AI_Controller : MonoBehaviour
     bool doSimulation = true;
     List<int> keysToRemove = new List<int>();
 
+    //timers
+    [SerializeField]
+    private Timer _Timer;
+
+    //scene creation
+    Vector2 sceneSize;
+    Vector3 sceneScale;
+    float spacingX;
+    float spacingY;
+    SpriteRenderer sceneSprite;
+    float xPosition;
+    float yPosition;
+
     //data of agents send to server
     public class agentData
     {
         public bool alive = true;
         public int reward = 0;
+        public string reason = "";
+        public int lifeTime = 0;
     }
 
     //contain agents
@@ -137,6 +152,8 @@ public class AI_Controller : MonoBehaviour
         masageFromServer = receiveResponseFromServerSync();
         if ((string)masageFromServer["action"] == "create")
         {
+            _Timer.nextGeneration();
+
             switch (_dropdown.value)
             {
                 case 0:
@@ -154,7 +171,69 @@ public class AI_Controller : MonoBehaviour
     }
     public void createAgentsPrey(int numberOfAgents)
     {
-        experienceScenes[0] = Instantiate(preyTest);
+        sceneSprite = preyTest.GetComponent<SpriteRenderer>();
+        sceneSize = sceneSprite.sprite.bounds.size;
+        sceneScale = preyTest.transform.localScale;
+
+        spacingX = sceneSize.x * sceneScale.x;
+        spacingY = sceneSize.y * sceneScale.y;
+
+        for (int i = 0; i < numberOfAgents; i++)
+        {
+            xPosition = (i % 5) * (spacingX+10);
+            yPosition = -(i / 5) * (spacingY+10);
+            experienceScenes[i] = Instantiate(preyTest, new Vector3(xPosition, yPosition, 0), Quaternion.identity);
+
+            sceneSprite = experienceScenes[i].GetComponent<SpriteRenderer>();
+
+            Vector2 spriteSize = sceneSprite.bounds.size;
+            Vector3 spriteCenter = sceneSprite.bounds.center;
+
+            Vector2 agentPosition = new Vector2(0, 0);
+            Vector2 targetPosition = new Vector2(0, 0);
+
+            float randomX = 0;
+            float randomY = 0;
+
+            do
+            {
+                randomX = Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
+                randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
+
+                agentPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
+            }
+            while (Physics.OverlapSphere(agentPosition, 2).Length != 0);
+
+            GameObject createdAgent = null;
+
+            createdAgent = Instantiate(Agent, agentPosition, Quaternion.identity, experienceScenes[i].transform);
+            createdAgent.transform.localScale = new Vector2(0.022f,0.05f);
+
+            agents.Add(i, createdAgent);
+            agentsPositions.Add(i, new agentData());
+
+            for (int j = 0; j < 20; j++)
+            {
+                do
+                {
+                    randomX = Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
+                    randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
+
+                    targetPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
+                }
+                while (Physics.OverlapSphere(targetPosition, 2).Length != 0);
+
+                GameObject createdTarget = null;
+
+                createdTarget = Instantiate(Food, targetPosition, Quaternion.identity, experienceScenes[i].transform);
+                createdTarget.transform.localScale = new Vector2(0.022f, 0.05f);
+
+                targets.Add(createdTarget);
+            }
+        }
+
+        //old one
+        /*experienceScenes[0] = Instantiate(preyTest);
 
         SpriteRenderer myRenderer = experienceScenes[0].GetComponent<SpriteRenderer>();
         Vector2 spriteSize = myRenderer.bounds.size;
@@ -165,6 +244,8 @@ public class AI_Controller : MonoBehaviour
 
         float randomX = 0;
         float randomY = 0;
+
+
 
 
         for (int i = 0; i < numberOfAgents; i++)
@@ -203,11 +284,12 @@ public class AI_Controller : MonoBehaviour
             targets.Add(createdTarget);
         }
 
-        Debug.Log("Creating agents: "+ numberOfAgents);
+        Debug.Log("Creating agents: "+ numberOfAgents);*/
     }
     async Task runAI()
     {
         Debug.Log("Starting NEAT");
+        _Timer.on();
 
         while (doSimulation)
         {
@@ -235,12 +317,25 @@ public class AI_Controller : MonoBehaviour
 
                 //aply action
                 Debug.Log("Apply Action");
+                foreach (var agent in agents)
+                {
+                    agent.Value.GetComponent<AI_PreyAgent>().move((int)masageFromServer[agent.Key.ToString()]);
+                }
 
                 //get rewards
                 foreach (var agent in agentsPositions)
                 {
                     agent.Value.reward = Random.Range(-10, 1);
-                    agent.Value.alive = Random.value < 0.75f;
+
+                    if (agents[agent.Key].GetComponent<AI_PreyAgent>().hp <= 0)
+                    {
+                        agent.Value.alive = false;
+                        agent.Value.reason = "food";
+                    }
+                    else
+                        agent.Value.alive = true;
+
+                    agent.Value.lifeTime = (int)_Timer._currentTime;
                 }
                 Debug.Log("Getting rewards");
 
@@ -276,7 +371,7 @@ public class AI_Controller : MonoBehaviour
                 if ((string)masageFromServer["action"] == "new_gen")
                     break;
 
-                await sendResponseToServerAsync("We can continue");
+                await sendResponseToServerAsync("We can continue",null,0, (int)_Timer._currentTime,(int)_Timer._currentTotalTime);
 
                 //clearAgents();
                 //Debug.Log("Clearing simulation");
@@ -286,14 +381,24 @@ public class AI_Controller : MonoBehaviour
         if (doSimulation)
         {
             Debug.Log("New generation");
-            await sendResponseToServerAsync("We can do next generation");
+            await sendResponseToServerAsync("We can do next generation", null, 0, (int)_Timer._currentTime, (int)_Timer._currentTotalTime);
+
+
+            _Timer.off();
+            _Timer.nextGeneration();
+
             makeNextGeneration();
         }
         else 
         {
+
+            _Timer.off();
+            _Timer.nextGeneration();
+
             masageFromServer = await receiveResponseFromServerAsync();
             sendResponseToServerSync("stop");
             clearAgents();
+            _Timer.restartTimers();
         }
     }
     async void makeNextGeneration()
@@ -352,13 +457,15 @@ public class AI_Controller : MonoBehaviour
     }
 
     // sending and receiving information to/from server
-    async Task sendResponseToServerAsync(string message = null, string network = null, int expNumber = 0)
+    async Task sendResponseToServerAsync(string message = null, string network = null, int expNumber = 0, int time = 0, int totalTime = 0)
     {
         var response = new
         {
             message = message,
             network = network,
-            expNumber = expNumber
+            expNumber = expNumber,
+            time = time,
+            totalTime = totalTime
         };
 
         jsonData = JsonConvert.SerializeObject(response);
