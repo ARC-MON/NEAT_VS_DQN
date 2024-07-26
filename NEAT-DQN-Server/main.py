@@ -1,5 +1,7 @@
 import socket
 import json
+import time
+
 import psutil
 import neat
 import os
@@ -111,6 +113,7 @@ def runDQN():
 
         for key in DQNagents:
             DQNagents[key].done = False
+            DQNagents[key].cumulativeReward = 0
             agentsActions[key] = 0
 
         print(f"Making client to create agents")
@@ -153,6 +156,8 @@ def runDQN():
             response = json.dumps(agentsActions)
             conn.send(response.encode('utf-8'))
 
+            time.sleep(1)
+
             print(f"Get new state with rewards")
             data = conn.recv(4096)
             json_data = json.loads(data.decode('utf-8'))
@@ -166,23 +171,25 @@ def runDQN():
             for key in agentsActions:
                 DQNagents[key].newState = [0, 0, 1] #popraw na pobierane z unity
                 DQNagents[key].done = not (json_data['0']['alive'])
-                DQNagents[key].reward += 10
+                DQNagents[key].reward = json_data['0']['reward']
+                DQNagents[key].cumulativeReward += json_data['0']['reward']
 
             print(f"Short memory training")
             for key in agentsActions:
                 DQNagents[key].train_short_memory(DQNagents[key].oldState, DQNagents[key].move, DQNagents[key].reward, DQNagents[key].newState, DQNagents[key].done)
                 DQNagents[key].remember(DQNagents[key].oldState, DQNagents[key].move, DQNagents[key].reward, DQNagents[key].newState, DQNagents[key].done)
+                DQNagents[key].reward = 0
 
             print(f"Remembering")
 
             for key in DQNagents:
                 if DQNagents[key].done == True:
                     agentsActions.pop(key)
-                    agentTimes.append()
+                    agentTimes.append(json_data['0']['lifeTime'])
 
             print(f"Testing if all agents are dead")
 
-            if all(instance.done == True for instance in DQNagents.values()):
+            if len(agentsActions) <= 0:
                 response = json.dumps({"action": "new_gen"})
                 conn.send(response.encode('utf-8'))
                 print(f"Waiting for ability to continue new_ge")
@@ -215,18 +222,20 @@ def runDQN():
 
         agentsActions.clear()
 
-        if (Agent.generation) % 50 == 0:
-            DQNagents[0].saveModel(folderName)
-
         cpu, memory = next(resource_monitor)
         cpu_data.append(sum(cpu) / len(cpu))
         memory_data.append(memory)
         avg_cpu_data.append((sum(cpu_data) / len(cpu_data)))
         avg_memory_data.append((sum(memory_data) / len(memory_data)))
+        maxFit.append(DQNagents[0].cumulativeReward)
+        maxTime.append(agentTimes[0])
 
         cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "DQN")
-        fitPloter(maxFit, minFit, avgFit, "", "DQN") # dokończyć
-        timePloter(maxTime, minTime, avgTime, "", "DQN") # dokończyć
+        fitPloter(maxFit, maxFit, maxFit, "", "DQN")
+        timePloter(maxTime, maxTime, maxTime, "", "DQN")
+
+        if (Agent.generation) % 50 == 0:
+            DQNagents[0].saveModel(folderName)
 def runNEAT(config_file):
     global population, folderName
 
@@ -298,7 +307,7 @@ def fitnessNEAT(genomes, config):
         nets[i] = neat.nn.FeedForwardNetwork.create(genome, config)
 
     print(f"Making client to create agents")
-    response = json.dumps({"action": "create", "number": 10})
+    response = json.dumps({"action": "create", "number": 2})
     conn.send(response.encode('utf-8'))
 
     print(f"Confirmation of client creation")
@@ -326,6 +335,8 @@ def fitnessNEAT(genomes, config):
         for key in agentsActions:
             output_value = nets[key].activate((0, 1, 0))
             agentsActions[key] = output_value.index(max(output_value))
+
+        time.sleep(1)
 
         print(f"Send action to client")
         response = json.dumps(agentsActions)
@@ -416,8 +427,8 @@ def fitnessNEAT(genomes, config):
     avg_memory_data.append((sum(memory_data) / len(memory_data)))
 
     cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "NEAT")
-    fitPloter(maxFit, minFit, avgFit, "", "NEAT")
-    timePloter(maxTime, minTime, avgTime, "", "NEAT")
+    fitPloter(maxFit, maxFit, maxFit, "", "NEAT")
+    #timePloter(maxTime, minTime, avgTime, "", "NEAT")
 
     if (population.generation+1) % 50 == 0 and fitestNEATAgent is not None:
         saveNEAT(folderName, bestNEATGeneration)
@@ -437,8 +448,8 @@ def saveDQN(folderName, generations):
     os.makedirs(f"{full_path}", exist_ok=True)
 
     cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, full_path, "DQN")
-    fitPloter(maxFit, minFit, avgFit, full_path, "DQN")
-    timePloter(maxTime, minTime, avgTime, full_path, "DQN")
+    fitPloter(maxFit, maxFit, maxFit, full_path, "DQN")
+    timePloter(maxTime, maxTime, maxTime, full_path, "DQN")
 
 
 

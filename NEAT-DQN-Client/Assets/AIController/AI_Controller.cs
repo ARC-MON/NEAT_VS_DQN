@@ -47,6 +47,7 @@ public class AI_Controller : MonoBehaviour
     //simulation only variables
     bool doSimulation = true;
     List<int> keysToRemove = new List<int>();
+    bool afterAction = true;
 
     //timers
     [SerializeField]
@@ -212,7 +213,7 @@ public class AI_Controller : MonoBehaviour
             agents.Add(i, createdAgent);
             agentsPositions.Add(i, new agentData());
 
-            for (int j = 0; j < 20; j++)
+            for (int j = 0; j < 45; j++)
             {
                 do
                 {
@@ -226,65 +227,11 @@ public class AI_Controller : MonoBehaviour
                 GameObject createdTarget = null;
 
                 createdTarget = Instantiate(Food, targetPosition, Quaternion.identity, experienceScenes[i].transform);
-                createdTarget.transform.localScale = new Vector2(0.022f, 0.05f);
+                createdTarget.transform.localScale = new Vector2(0.01f, 0.02f);
 
                 targets.Add(createdTarget);
             }
         }
-
-        //old one
-        /*experienceScenes[0] = Instantiate(preyTest);
-
-        SpriteRenderer myRenderer = experienceScenes[0].GetComponent<SpriteRenderer>();
-        Vector2 spriteSize = myRenderer.bounds.size;
-        Vector3 spriteCenter = myRenderer.bounds.center;
-
-        Vector2 agentPosition = new Vector2(0, 0);
-        Vector2 targetPosition = new Vector2(0, 0);
-
-        float randomX = 0;
-        float randomY = 0;
-
-
-
-
-        for (int i = 0; i < numberOfAgents; i++)
-        {
-            do 
-            {
-                randomX =  Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
-                randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
-
-                agentPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
-            } 
-            while(Physics.OverlapSphere(agentPosition, 2).Length != 0);
-
-            GameObject createdAgent = null;
-
-            createdAgent = Instantiate(Agent, agentPosition, Quaternion.identity);
-
-            agents.Add(i, createdAgent);
-            agentsPositions.Add(i, new agentData());
-        }
-
-        for (int i = 0; i < 20; i++)
-        {
-            do
-            {
-                randomX = Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
-                randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
-
-                targetPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
-            }
-            while (Physics.OverlapSphere(targetPosition, 2).Length != 0);
-
-            GameObject createdTarget = null;
-
-            createdTarget = Instantiate(Food, targetPosition, Quaternion.identity);
-            targets.Add(createdTarget);
-        }
-
-        Debug.Log("Creating agents: "+ numberOfAgents);*/
     }
     async Task runAI()
     {
@@ -299,10 +246,6 @@ public class AI_Controller : MonoBehaviour
             if ((string)masageFromServer["action"] == "SendData")
             {
                 //getting data - change to method collecting data
-                foreach (var agent in agentsPositions)
-                {
-                    agent.Value.reward = Random.Range(0, 11);
-                }
                 Debug.Log("Getting Data");
 
                 //send data
@@ -319,18 +262,21 @@ public class AI_Controller : MonoBehaviour
                 Debug.Log("Apply Action");
                 foreach (var agent in agents)
                 {
-                    agent.Value.GetComponent<AI_PreyAgent>().move((int)masageFromServer[agent.Key.ToString()]);
+                    afterAction = agent.Value.GetComponent<AI_PreyAgent>().move((int)masageFromServer[agent.Key.ToString()]);
+                    afterAction = agent.Value.GetComponent<AI_PreyAgent>().detect();
                 }
 
                 //get rewards
                 foreach (var agent in agentsPositions)
                 {
-                    agent.Value.reward = Random.Range(-10, 1);
+                    agent.Value.reward = agents[agent.Key].GetComponent<AI_PreyAgent>().reward;
+                    agents[agent.Key].GetComponent<AI_PreyAgent>().reward = 0;
 
                     if (agents[agent.Key].GetComponent<AI_PreyAgent>().hp <= 0)
                     {
                         agent.Value.alive = false;
                         agent.Value.reason = "food";
+                        agent.Value.reward = -10;
                     }
                     else
                         agent.Value.alive = true;

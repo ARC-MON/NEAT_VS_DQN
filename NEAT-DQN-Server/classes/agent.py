@@ -15,6 +15,7 @@ class Agent:
         self.gamma = 0.9
         self.memory = deque(maxlen=MAX_MEMORY)
         self.model = model(3, 256, 4)
+        self.cumulativeReward = 0
 
         if existingNetwork is not None:
             print("Network exist")
