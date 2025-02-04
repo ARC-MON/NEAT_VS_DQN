@@ -13,6 +13,7 @@ using UnityEditor.VersionControl;
 using Random = UnityEngine.Random;
 using System.Threading.Tasks;
 using System.Linq;
+using static TMPro.SpriteAssetUtilities.TexturePacker_JsonArray;
 
 public class AI_Controller : MonoBehaviour
 {
@@ -48,6 +49,7 @@ public class AI_Controller : MonoBehaviour
     bool doSimulation = true;
     List<int> keysToRemove = new List<int>();
     bool afterAction = true;
+    public int numberOfMoves = 0;
 
     //timers
     [SerializeField]
@@ -66,9 +68,15 @@ public class AI_Controller : MonoBehaviour
     public class agentData
     {
         public bool alive = true;
-        public int reward = 0;
         public string reason = "";
+        public int reward = 0;
+        public int x = 0;
+        public int y = 0;
+
+        public int moveNumber = 0;
         public int lifeTime = 0;
+        public List<int> who = new List<int>();
+        public List<int> distance = new List<int>();
     }
 
     //contain agents
@@ -79,6 +87,8 @@ public class AI_Controller : MonoBehaviour
     IDictionary<int, GameObject> experienceScenes = new Dictionary<int, GameObject>();
     //contains targets in experiment
     List<GameObject> targets = new List<GameObject>();
+    //enemies
+    IDictionary<int, List<GameObject>> enemiesDictionary = new Dictionary<int, List<GameObject>>();
 
     //Environments
     public GameObject preyTest;
@@ -88,6 +98,7 @@ public class AI_Controller : MonoBehaviour
     //Agents
     public GameObject Agent;
     public GameObject Food;
+    public GameObject Enemy;
 
     private void Start()
     {
@@ -153,7 +164,6 @@ public class AI_Controller : MonoBehaviour
         masageFromServer = receiveResponseFromServerSync();
         if ((string)masageFromServer["action"] == "create")
         {
-            _Timer.nextGeneration();
 
             switch (_dropdown.value)
             {
@@ -164,7 +174,7 @@ public class AI_Controller : MonoBehaviour
                     break;
                 case 1:
                     createAgentsPrey((int)masageFromServer["number"]);
-                    sendResponseToServerSync("AgentsCreated");
+                    sendResponseToServerSync("AgentsCreated");;
                     await runAI();
                     break;
             }
@@ -192,9 +202,12 @@ public class AI_Controller : MonoBehaviour
 
             Vector2 agentPosition = new Vector2(0, 0);
             Vector2 targetPosition = new Vector2(0, 0);
+            Vector2 enemyPosition = new Vector2(0, 0);
 
             float randomX = 0;
             float randomY = 0;
+
+            makeFood(60, experienceScenes[i]);
 
             do
             {
@@ -212,30 +225,65 @@ public class AI_Controller : MonoBehaviour
 
             agents.Add(i, createdAgent);
             agentsPositions.Add(i, new agentData());
+            enemiesDictionary[i] = new List<GameObject>();
 
-            for (int j = 0; j < 45; j++)
+            for (int j = 0; j < 4; j++)
             {
                 do
                 {
                     randomX = Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
                     randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
 
-                    targetPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
+                    enemyPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
                 }
-                while (Physics.OverlapSphere(targetPosition, 2).Length != 0);
+                while (Physics.OverlapSphere(enemyPosition, 2).Length != 0);
 
-                GameObject createdTarget = null;
+                GameObject createdEnemy = null;
+                createdEnemy = Instantiate(Enemy, enemyPosition, Quaternion.identity, experienceScenes[i].transform);
+                createdEnemy.transform.localScale = new Vector2(0.01f, 0.02f);
 
-                createdTarget = Instantiate(Food, targetPosition, Quaternion.identity, experienceScenes[i].transform);
-                createdTarget.transform.localScale = new Vector2(0.01f, 0.02f);
-
-                targets.Add(createdTarget);
+                enemiesDictionary[i].Add(createdEnemy);
             }
         }
     }
+
+    public void makeFood(int numberOfFood, GameObject scene)
+    {
+        Vector2 targetPosition = new Vector2(0, 0);
+
+        sceneSprite = scene.GetComponent<SpriteRenderer>();
+
+        Vector2 spriteSize = sceneSprite.bounds.size;
+        Vector3 spriteCenter = sceneSprite.bounds.center;
+
+        float randomX = 0;
+        float randomY = 0;
+
+        for (int j = 0; j < numberOfFood; j++)
+        {
+            do
+            {
+                randomX = Random.Range(spriteCenter.x - (spriteSize.x - 3) / 2, spriteCenter.x + (spriteSize.x - 3) / 2);
+                randomY = Random.Range(spriteCenter.y - (spriteSize.y - 3) / 2, spriteCenter.y + (spriteSize.y - 3) / 2);
+
+                targetPosition = new Vector2(Mathf.RoundToInt(randomX), Mathf.RoundToInt(randomY));
+            }
+            while (Physics.OverlapSphere(targetPosition, 2).Length != 0);
+
+            GameObject createdTarget = null;
+
+            createdTarget = Instantiate(Food, targetPosition, Quaternion.identity, scene.transform);
+            createdTarget.transform.localScale = new Vector2(0.01f, 0.02f);
+
+            targets.Add(createdTarget);
+        }
+
+    }
+
     async Task runAI()
     {
         Debug.Log("Starting NEAT");
+        numberOfMoves = 0;
         _Timer.on();
 
         while (doSimulation)
@@ -247,6 +295,12 @@ public class AI_Controller : MonoBehaviour
             {
                 //getting data - change to method collecting data
                 Debug.Log("Getting Data");
+
+
+                foreach (var agent in agents)
+                {
+                    (agentsPositions[agent.Key].x, agentsPositions[agent.Key].y, agentsPositions[agent.Key].who, agentsPositions[agent.Key].distance, agentsPositions[agent.Key].lifeTime) = agent.Value.GetComponent<AI_PreyAgent>().getState();
+                }
 
                 //send data
                 await sendAgentsDataToServer();
@@ -262,8 +316,24 @@ public class AI_Controller : MonoBehaviour
                 Debug.Log("Apply Action");
                 foreach (var agent in agents)
                 {
-                    afterAction = agent.Value.GetComponent<AI_PreyAgent>().move((int)masageFromServer[agent.Key.ToString()]);
-                    afterAction = agent.Value.GetComponent<AI_PreyAgent>().detect();
+                    if (!(masageFromServer[agent.Key.ToString()] == null))
+                    {
+                        afterAction = agent.Value.GetComponent<AI_PreyAgent>().move((int)masageFromServer[agent.Key.ToString()]);
+                        //enemy move
+                        foreach (var enemy in enemiesDictionary[agent.Key])
+                        {
+                            afterAction = enemy.GetComponent<AI_Predatoragent>().makeMove(agent.Value);
+                        }
+                        afterAction = agent.Value.GetComponent<AI_PreyAgent>().detect();
+                        (agentsPositions[agent.Key].x, agentsPositions[agent.Key].y, agentsPositions[agent.Key].who, agentsPositions[agent.Key].distance, agentsPositions[agent.Key].lifeTime) = agent.Value.GetComponent<AI_PreyAgent>().getState();
+                    }
+                }
+
+                numberOfMoves++;
+
+                foreach (var agent in agents)
+                {
+                    agentsPositions[agent.Key].moveNumber = numberOfMoves;
                 }
 
                 //get rewards
@@ -278,16 +348,25 @@ public class AI_Controller : MonoBehaviour
                         agent.Value.reason = "food";
                         agent.Value.reward = -10;
                     }
+                    else if (agents[agent.Key].GetComponent<AI_PreyAgent>().captured == true)
+                    {
+                        agent.Value.alive = false;
+                        agent.Value.reason = "enemy";
+                        agent.Value.reward = -20;
+                    }
                     else
                         agent.Value.alive = true;
-
-                    agent.Value.lifeTime = (int)_Timer._currentTime;
                 }
                 Debug.Log("Getting rewards");
 
                 //confirm update with rewards
                 await sendAgentsDataToServer();
                 Debug.Log("Send revards");
+
+                foreach (var agent in agentsPositions)
+                {
+                    agent.Value.reward = 0;
+                }
 
                 //deliting dead agents
 
@@ -317,7 +396,7 @@ public class AI_Controller : MonoBehaviour
                 if ((string)masageFromServer["action"] == "new_gen")
                     break;
 
-                await sendResponseToServerAsync("We can continue",null,0, (int)_Timer._currentTime,(int)_Timer._currentTotalTime);
+                await sendResponseToServerAsync("We can continue",null,0, numberOfMoves, (int)_Timer._currentTotalTime);
 
                 //clearAgents();
                 //Debug.Log("Clearing simulation");
@@ -327,7 +406,7 @@ public class AI_Controller : MonoBehaviour
         if (doSimulation)
         {
             Debug.Log("New generation");
-            await sendResponseToServerAsync("We can do next generation", null, 0, (int)_Timer._currentTime, (int)_Timer._currentTotalTime);
+            await sendResponseToServerAsync("We can do next generation", null, 0, numberOfMoves, (int)_Timer._currentTotalTime);
 
 
             _Timer.off();
@@ -381,6 +460,16 @@ public class AI_Controller : MonoBehaviour
             Destroy(item.Value);
         }
         experienceScenes.Clear();
+
+        foreach (var list in enemiesDictionary)
+        {
+            foreach (var enemy in list.Value)
+            {
+                Destroy(enemy);
+            }
+            list.Value.Clear();
+        }
+        enemiesDictionary.Clear();
     }
 
     async Task sendAgentsDataToServer()

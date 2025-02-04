@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.VisualScripting;
@@ -8,12 +9,14 @@ using UnityEngine.UIElements;
 public class AI_PreyAgent : MonoBehaviour
 {
     public UnityEngine.UI.Slider hpVisual;
-    public float hp = 10;
-    private float startingHp = 10;
+    public float hp = 20;
+    private float startingHp = 20;
     private Vector3 myMove;
     public int reward = 0;
+    private int who;
+    public bool captured = false;
 
-    public float detectionRadius = 1.0f;
+    public float detectionRadius = 0.5f;
     public Color gizmoColor = Color.red;
 
     //Reycast variables
@@ -25,36 +28,51 @@ public class AI_PreyAgent : MonoBehaviour
     private List<int> _distances = new List<int>();
     private Vector3 MyGlobalPosition;
     private Vector3 MyParrentPosition;
+    private List<Vector3> reyStartingPositions = new List<Vector3> 
+    {
+        new Vector3(0, 1, 0),
+        new Vector3(1, 0, 0),
+        new Vector3(0, -1, 0),
+        new Vector3(-1, 0, 0)
+    };
+    private List<Vector2> rayStartingDirections = new List<Vector2>
+    {
+        Vector2.up,
+        Vector2.right,
+        Vector2.down,
+        Vector2.left
+    };
 
     private void Start()
     {
         hpVisual.value = hp / startingHp;
+        captured = false;
     }
     private void Update()
     {
-        gateState();
+        getState();
     }
     public bool move(int direction)
     {
         switch (direction) 
         {
             case 0:
-                myMove = new Vector3(0, 1, 0);
+                myMove = reyStartingPositions[0];
                 transform.position += myMove;
                 hp -= 1;
                 break;
             case 1:
-                myMove = new Vector3(1, 0, 0);
+                myMove = reyStartingPositions[1];
                 transform.position += myMove;
                 hp -= 1;
                 break; 
             case 2:
-                myMove = new Vector3(0, -1, 0);
+                myMove = reyStartingPositions[2];
                 transform.position += myMove;
                 hp -= 1;
                 break;
             case 3:
-                myMove = new Vector3(-1, 0, 0);
+                myMove = reyStartingPositions[3];
                 transform.position += myMove;
                 hp -= 1;
                 break;
@@ -82,9 +100,15 @@ public class AI_PreyAgent : MonoBehaviour
                 hp = startingHp;
                 hpVisual.value = hp / startingHp;
                 reward = 20;
+                GameObject.FindWithTag("AI").GetComponent<AI_Controller>().makeFood(1, transform.parent.gameObject);
                 Destroy(collider.gameObject);
             }
-            
+            else if (collider.gameObject.tag == "Predator")
+            {
+                captured = true;
+            }
+
+
         }
 
         return true;
@@ -94,32 +118,47 @@ public class AI_PreyAgent : MonoBehaviour
         Gizmos.color = gizmoColor;
         Gizmos.DrawWireSphere(transform.position, detectionRadius);
     }
-    public void gateState()
+    public (int x, int y, List<int> _types, List<int> _distances, int hp) getState()
     {
-        MyParrentPosition = transform.parent.position;
-        MyGlobalPosition = transform.position - MyParrentPosition;
-
         _types.Clear();
         _distances.Clear();
 
-        startingPosition = MyGlobalPosition + new Vector3(0, 1);
-        direction = Vector2.up;
+        MyParrentPosition = transform.parent.position;
+        MyGlobalPosition = transform.position - MyParrentPosition;
 
-        hit = Physics2D.Raycast(transform.position, direction, lengthReycast);
-        Debug.DrawRay(transform.position, direction * lengthReycast, Color.blue);
+        //Debug.Log("Moja obecna pozycja" + transform.position);
 
-        if (hit.collider != null)
+        for (int i = 0; i < 4; i++)
         {
-            _types.Add(whoISee(hit.collider.tag));
-            _distances.Add((int)(Vector2.Distance(MyGlobalPosition, hit.transform.position))); //popraw
-        }
-        else
-        {
-            _types.Add(0);
-            _distances.Add(0);
+            startingPosition = transform.position + reyStartingPositions[i];
+            direction = rayStartingDirections[i];
+
+            hit = Physics2D.Raycast(startingPosition, direction, lengthReycast);
+            Debug.DrawRay(startingPosition, direction * lengthReycast, Color.blue);
+
+            if (hit.collider != null)
+            {
+                who = whoISee(hit.collider.tag);
+                _types.Add(who);
+                Debug.Log(who);
+
+                //Debug.Log("Collision tag: " + hit.collider.tag);
+                if (who == 0)
+                    _distances.Add(0);
+                else
+                    _distances.Add((int)Math.Round(Vector2.Distance(transform.position, hit.point))); //popraw
+                //Debug.Log("Dystans do wykrytego" + _distances[_distances.Count - 1]);
+            }
+            else
+            {
+                _types.Add(0);
+                _distances.Add(0);
+            }
         }
 
-        Debug.Log(MyGlobalPosition);
+        //Debug.Log("Moja pozycja"+MyGlobalPosition);
+
+        return ((int)Math.Round(MyGlobalPosition.x), (int)Math.Round(MyGlobalPosition.y), _types, _distances, (int)hp);
     }
     public int whoISee(string tag)
     {
@@ -129,6 +168,8 @@ public class AI_PreyAgent : MonoBehaviour
                 return 1;
             case "Wall":
                 return 2;
+            case "Predator":
+                return 3;
             default:
                 return 0;
         }

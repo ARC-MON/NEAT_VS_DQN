@@ -504,7 +504,7 @@ GameObject:
   - component: {fileID: 5436089289212911157}
   m_Layer: 0
   m_Name: TetsAgent
-  m_TagString: Untagged
+  m_TagString: Prey
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -590,8 +590,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   hpVisual: {fileID: 2412805698021325524}
-  hp: 10
+  hp: 20
   reward: 0
+  captured: 0
   detectionRadius: 0.5
   gizmoColor: {r: 1, g: 0, b: 0, a: 1}
 --- !u!58 &9200152956051432222

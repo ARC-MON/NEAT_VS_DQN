@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import os
 import csv
+import pandas as pd
 
 plt.ion()
 
@@ -27,16 +28,39 @@ ax8.legend()
 ax8.grid(True)
 
 fig1, ax1 = plt.subplots(figsize=(10, 6))
-line1_1, = ax1.plot([], [], label='Najdłuższy czas w generacji')
-line1_2, = ax1.plot([], [], label='Najkrótszy czas w generacji')
-line1_3, = ax1.plot([], [], label='Średni czas w generacji')
+line1_1, = ax1.plot([], [], label='Najwięcej ruchów w generacji')
+line1_2, = ax1.plot([], [], label='Najmniej ruchów w generacji')
+line1_3, = ax1.plot([], [], label='Średnio ruchów w generacji')
 
 ax1.set_xlabel('Generacja')
-ax1.set_ylabel('Czas')
+ax1.set_ylabel('Ilość')
 ax1.legend()
 ax1.grid(True)
+
+fig6, ax6 = plt.subplots(figsize=(10, 6))
+line6_1, = ax6.plot([], [], label='Wyuczone ruchy')
+line6_2, = ax6.plot([], [], label='Losowe ruchy')
+
+ax6.set_xlabel('Generacja')
+ax6.set_ylabel('Ilość')
+ax6.set_title('Rodzaj ruchu wykoanany przez agenta DQN')
+ax6.legend()
+ax6.grid(True)
+
+fig5, ax5 = plt.subplots(figsize=(10, 6))
+line5_1, = ax5.plot([], [], label='Głód')
+line5_2, = ax5.plot([], [], label='Drapieżnik')
+
+ax5.set_xlabel('Generacja')
+ax5.set_ylabel('Ilość')
+ax5.set_title('Powód śmierci agenta')
+ax5.legend()
+ax5.grid(True)
+
+fig10, ax10 = plt.subplots(figsize=(10, 6))
+
 def timePloter(best, worst, avg, filePath, model):
-    ax1.set_title(f'Czas agentów {model} w symulacji')
+    ax1.set_title(f'Liczba ruchów agentów {model} w symulacji')
 
     generations = list(range(1, len(best) + 1))
 
@@ -57,7 +81,7 @@ def timePloter(best, worst, avg, filePath, model):
         pathToSave = os.path.join(filePath, f'{model}_agents_times_Generation{len(generations)}.csv')
         with open(pathToSave, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["Generacja", "Najdłuższy czas w generacji", "Najkrótszy czas w generacji", "Średni czas w generacji"])
+            writer.writerow(["Generacja", "Najwyższa ocena w generacji", "Najniższa ocena w generacji", "Średnia ocena generacji"])
             for gen, max_f, min_f, avg_f in zip(generations, best, worst, avg):
                 writer.writerow([gen, max_f, min_f, avg_f])
 def fitPloter(best, worst, avg, filePath, model):
@@ -111,3 +135,95 @@ def cpuPloter(cpu, avgcpu, memory, avgmemory, filePath, model):
             writer.writerow(["Generacja", "Procesor - zużycie", "Procesor - zużycie średnie", "Pamięć - zużycie", "Pamięć - zużycie średnie"])
             for gen, max_f, min_f, avg_f, avg_m in zip(generations, cpu, avgcpu, memory, avgmemory):
                 writer.writerow([gen, max_f, min_f, avg_f])
+def movesPloter(calculated, random, filePath, model):
+    generations = list(range(1, len(calculated) + 1))
+
+    line6_1.set_data(generations, calculated)
+    line6_2.set_data(generations, random)
+
+    ax6.set_xlim(0, len(generations) + 1)
+    ax6.set_ylim(min(min(calculated), min(random)) - 1, max(max(calculated), max(random)) + 1)
+
+    fig6.canvas.draw()
+    fig6.canvas.flush_events()
+
+    if filePath != "":
+        pathToSave = os.path.join(filePath, f'{model}_MoveType_Generation{len(generations)}.png')
+        fig6.savefig(pathToSave)
+
+        pathToSave = os.path.join(filePath, f'{model}_MoveType_Generation{len(generations)}.csv')
+        with open(pathToSave, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Generacja", "Wyuczone ruchy", "Losowe ruchy"])
+            for gen, max_f, min_f in zip(generations, calculated, random):
+                writer.writerow([gen, max_f, min_f])
+def deathPloter(food, enemy, filePath, model):
+    generations = list(range(1, len(food) + 1))
+
+    line5_1.set_data(generations, food)
+    line5_2.set_data(generations, enemy)
+
+    ax5.set_xlim(0, len(generations)+1)
+    ax5.set_ylim(min(min(food), min(enemy)) - 1, max(max(food), max(enemy)) + 1)
+
+    fig5.canvas.draw()
+    fig5.canvas.flush_events()
+
+    if filePath != "":
+        pathToSave = os.path.join(filePath, f'{model}_CauseOfDeath_Generation{len(generations)}.png')
+        fig5.savefig(pathToSave)
+
+        pathToSave = os.path.join(filePath, f'{model}_CauseOfDeath_Generation{len(generations)}.csv')
+        with open(pathToSave, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Generacja", "Głód", "Przeciwnik"])
+            for gen, max_f, min_f in zip(generations, food, enemy):
+                writer.writerow([gen, max_f, min_f])
+def decisionPoter(decisionsData, filePath, model, generations):
+
+    summed_data = {}
+    for key, subdict in decisionsData.items():
+        for direction, types in subdict.items():
+            if direction not in summed_data:
+                summed_data[direction] = {}
+            for type_, values in types.items():
+                if type_ not in summed_data[direction]:
+                    summed_data[direction][type_] = [0] * len(values)
+                summed_data[direction][type_] = [sum(x) for x in zip(summed_data[direction][type_], values)]
+
+    percent_data = {}
+    for direction in summed_data:
+        percent_data[direction] = {}
+        for type_, values in summed_data[direction].items():
+            row_sum = sum(values)
+            percent_data[direction][type_] = [v / row_sum * 100 if row_sum != 0 else 0 for v in values]
+
+    rows = []
+    columns = ["W górę", "W prawo", "W dół", "W lewo"]
+
+    header = [""] + columns
+
+    for direction in percent_data:
+        for type_ in percent_data[direction]:
+            row = [f"{direction} {type_}"] + [f"{value:.2f}%" for value in percent_data[direction][type_]]
+            rows.append(row)
+
+    table = ax10.table(cellText=[header] + rows, colLabels=None, cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
+
+    ax10.set_title(f"Procentowe decyzje Agenta {model}", fontsize=16)
+
+    ax10.axis('off')
+
+    fig10.canvas.draw()
+    fig10.canvas.flush_events()
+
+    if filePath != "":
+        pathToSave = os.path.join(filePath, f'{model}_Decisions_Generation{generations}.png')
+        fig10.savefig(pathToSave)
+
+        pathToSave = os.path.join(filePath, f'{model}_Decisions_Generation{generations}.csv')
+        with open(pathToSave, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(header)
+            for row in rows:
+                writer.writerow(row)

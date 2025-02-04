@@ -15,7 +15,7 @@ public class Timer : MonoBehaviour
     private bool _on = false;
     public float _currentTime = 0;
     public float _currentTotalTime = 0;
-    public float _currentGeneration = 0;
+    public float _currentGeneration = 1;
 
     private int h;
     private int m;
@@ -33,6 +33,7 @@ public class Timer : MonoBehaviour
             m = ((int)_currentTotalTime % 3600) / 60;
             s = (int)_currentTotalTime % 60;
             _totalTimer.text = "Total time: " + h.ToString() + ":" + m.ToString() + ":" + s.ToString();
+            _generations.text = "Generation: " + _currentGeneration;
         }
     }
 
@@ -52,7 +53,6 @@ public class Timer : MonoBehaviour
     public void nextGeneration()
     {
         _currentGeneration++;
-        _generations.text = "Generation: " + _currentGeneration;
     }
 
     public void restartTimers()

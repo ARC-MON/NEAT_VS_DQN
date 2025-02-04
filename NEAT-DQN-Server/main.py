@@ -9,7 +9,7 @@ from datetime import datetime
 import pickle
 import copy
 from classes.agent import Agent
-from classes.ploter import cpuPloter, fitPloter, timePloter
+from classes.ploter import cpuPloter, fitPloter, timePloter, movesPloter, deathPloter, decisionPoter
 
 cpu_data = []
 memory_data = []
@@ -24,9 +24,19 @@ maxTime = []
 minTime = []
 avgTime = []
 
+calcMove = []
+randMove = []
+
+causeOfDeath = {}
+foodCause = []
+enemyCause = []
+generationMoves = {}
+
 fitestNEATAgent = None
 bestNEATGeneration = 0
 existingNetwork = None
+
+timeOfSimulation = 0
 
 def start_server():
     global conn, existingNetwork
@@ -80,7 +90,7 @@ def monitor_resources(interval=0.1):
         memory = psutil.virtual_memory().percent
         yield cpu, memory
 def runDQN():
-    global folderName
+    global folderName, timeOfSimulation
 
     print(f"Create agents")
     agentsActions = {}
@@ -103,10 +113,21 @@ def runDQN():
     avg_cpu_data.clear()
     avg_memory_data.clear()
 
+    calcMove.clear()
+    randMove.clear()
+    maxFit.clear()
+    maxTime.clear()
+    causeOfDeath.clear()
+    foodCause.clear()
+    enemyCause.clear()
+    generationMoves.clear()
+
     while True:
 
         resource_monitor = monitor_resources()
         agentTimes = []
+        causeOfDeath['food'] = 0
+        causeOfDeath['enemy'] = 0
 
         Agent.generation += 1
         print(Agent.generation)
@@ -115,6 +136,34 @@ def runDQN():
             DQNagents[key].done = False
             DQNagents[key].cumulativeReward = 0
             agentsActions[key] = 0
+            DQNagents[key].calculatedMove = 0
+            DQNagents[key].randomMove = 0
+
+        generationMoves[Agent.generation] = {
+            'Góra': {
+                'Nic': [0, 0, 0, 0],
+                'Jedzenie': [0, 0, 0, 0],
+                'Ściana': [0, 0, 0, 0],
+                'Drapieżnik': [0, 0, 0, 0],
+            },
+            'Prawo': {
+                'Nic': [0, 0, 0, 0],
+                'Jedzenie': [0, 0, 0, 0],
+                'Ściana': [0, 0, 0, 0],
+                'Drapieżnik': [0, 0, 0, 0],
+            },
+            'Dół': {
+                'Nic': [0, 0, 0, 0],
+                'Jedzenie': [0, 0, 0, 0],
+                'Ściana': [0, 0, 0, 0],
+                'Drapieżnik': [0, 0, 0, 0],
+            },
+            'Lewo': {
+                'Nic': [0, 0, 0, 0],
+                'Jedzenie': [0, 0, 0, 0],
+                'Ściana': [0, 0, 0, 0],
+                'Drapieżnik': [0, 0, 0, 0],
+            }}
 
         print(f"Making client to create agents")
         response = json.dumps({"action": "create", "number": 1})
@@ -148,15 +197,24 @@ def runDQN():
 
             print(f"Get action from data")
             for key in agentsActions:
-                DQNagents[key].oldState = [0, 1, 0] #popraw na pobierane z unity
+                DQNagents[key].oldState = [json_data[str(key)]['who'][0], json_data[str(key)]['distance'][0],
+                                               json_data[str(key)]['who'][1], json_data[str(key)]['distance'][1],
+                                               json_data[str(key)]['who'][2], json_data[str(key)]['distance'][2],
+                                               json_data[str(key)]['who'][3], json_data[str(key)]['distance'][3],
+                                               json_data[str(key)]['x'], json_data[str(key)]['y'],
+                                               json_data[str(key)]['lifeTime']]
                 DQNagents[key].move = DQNagents[key].get_action(DQNagents[key].oldState)
                 agentsActions[key] = DQNagents[key].move.index(max(DQNagents[key].move))
+
+                for index, word in enumerate(generationMoves[Agent.generation]):
+                    generationMoves[Agent.generation][word][whoISee(json_data[str(key)]['who'][index])][
+                        agentsActions[key]] += 1
 
             print(f"Send action to client")
             response = json.dumps(agentsActions)
             conn.send(response.encode('utf-8'))
 
-            time.sleep(1)
+            #time.sleep(1)
 
             print(f"Get new state with rewards")
             data = conn.recv(4096)
@@ -169,7 +227,12 @@ def runDQN():
                 raise StopIteration("Finished algorithm on demand")
 
             for key in agentsActions:
-                DQNagents[key].newState = [0, 0, 1] #popraw na pobierane z unity
+                DQNagents[key].newState = [json_data['0']['who'][0], json_data['0']['distance'][0],
+                                               json_data['0']['who'][1], json_data['0']['distance'][1],
+                                               json_data['0']['who'][2], json_data['0']['distance'][2],
+                                               json_data['0']['who'][3], json_data['0']['distance'][3],
+                                               json_data['0']['x'], json_data['0']['y'],
+                                               json_data['0']['lifeTime']]
                 DQNagents[key].done = not (json_data['0']['alive'])
                 DQNagents[key].reward = json_data['0']['reward']
                 DQNagents[key].cumulativeReward += json_data['0']['reward']
@@ -185,7 +248,8 @@ def runDQN():
             for key in DQNagents:
                 if DQNagents[key].done == True:
                     agentsActions.pop(key)
-                    agentTimes.append(json_data['0']['lifeTime'])
+                    agentTimes.append(json_data['0']['moveNumber'])
+                    causeOfDeath[json_data['0']['reason']] += 1
 
             print(f"Testing if all agents are dead")
 
@@ -202,6 +266,8 @@ def runDQN():
                     saveDQN(folderName, Agent.generation)
                     raise StopIteration("Finished algorithm on demand")
 
+                timeOfSimulation = json_data['totalTime']
+
                 break
             else:
                 response = json.dumps({"action": "continue"})
@@ -215,6 +281,8 @@ def runDQN():
                     DQNagents[0].saveModel(folderName)
                     saveDQN(folderName, Agent.generation)
                     raise StopIteration("Finished algorithm on demand")
+
+                timeOfSimulation = json_data['totalTime']
 
         print(f"Long memory training")
         for key in DQNagents:
@@ -230,12 +298,21 @@ def runDQN():
         maxFit.append(DQNagents[0].cumulativeReward)
         maxTime.append(agentTimes[0])
 
+        calcMove.append(DQNagents[0].calculatedMove)
+        randMove.append(DQNagents[0].randomMove)
+
+        foodCause.append(causeOfDeath['food'])
+        enemyCause.append(causeOfDeath['enemy'])
+
         cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "DQN")
         fitPloter(maxFit, maxFit, maxFit, "", "DQN")
         timePloter(maxTime, maxTime, maxTime, "", "DQN")
+        movesPloter(calcMove, randMove, "", "DQN")
+        deathPloter(foodCause, enemyCause, "", "DQN")
 
         if (Agent.generation) % 50 == 0:
             DQNagents[0].saveModel(folderName)
+            saveDQN(folderName, Agent.generation)
 def runNEAT(config_file):
     global population, folderName
 
@@ -279,13 +356,19 @@ def runNEAT(config_file):
     minTime.clear()
     avgTime.clear()
 
+    causeOfDeath.clear()
+    foodCause.clear()
+    enemyCause.clear()
+
+    generationMoves.clear()
+
     try:
        population.run(fitnessNEAT)
     except StopIteration as e:
         print(e)
         saveNEAT(folderName, bestNEATGeneration)
 def fitnessNEAT(genomes, config):
-    global fitestNEATAgent, bestNEATGeneration
+    global fitestNEATAgent, bestNEATGeneration, timeOfSimulation
 
     resource_monitor = monitor_resources()
 
@@ -295,19 +378,47 @@ def fitnessNEAT(genomes, config):
     a_genomes = {}
     nets = {}
     agentTimes = []
+    causeOfDeath['food'] = 0
+    causeOfDeath['enemy'] = 0
 
+    generationMoves[(population.generation + 1)] = {
+        'Góra': {
+            'Nic': [0, 0, 0, 0],
+            'Jedzenie': [0, 0, 0, 0],
+            'Ściana': [0, 0, 0, 0],
+            'Drapieżnik': [0, 0, 0, 0],
+        },
+        'Prawo': {
+            'Nic': [0, 0, 0, 0],
+            'Jedzenie': [0, 0, 0, 0],
+            'Ściana': [0, 0, 0, 0],
+            'Drapieżnik': [0, 0, 0, 0],
+        },
+        'Dół': {
+            'Nic': [0, 0, 0, 0],
+            'Jedzenie': [0, 0, 0, 0],
+            'Ściana': [0, 0, 0, 0],
+            'Drapieżnik': [0, 0, 0, 0],
+        },
+        'Lewo': {
+            'Nic': [0, 0, 0, 0],
+            'Jedzenie': [0, 0, 0, 0],
+            'Ściana': [0, 0, 0, 0],
+            'Drapieżnik': [0, 0, 0, 0],
+        }}
     bestTime = None
     worstTime = None
     meanTime = 0
 
     for i, (genome_id, genome) in enumerate(genomes):
-        agentsActions[i] = 0
-        genome.fitness = 0
-        a_genomes[i] = genome
-        nets[i] = neat.nn.FeedForwardNetwork.create(genome, config)
+        if i < 20:
+            agentsActions[i] = 0
+            genome.fitness = 0
+            a_genomes[i] = genome
+            nets[i] = neat.nn.FeedForwardNetwork.create(genome, config)
 
     print(f"Making client to create agents")
-    response = json.dumps({"action": "create", "number": 2})
+    response = json.dumps({"action": "create", "number": 20})
     conn.send(response.encode('utf-8'))
 
     print(f"Confirmation of client creation")
@@ -331,12 +442,26 @@ def fitnessNEAT(genomes, config):
         if json_data.get("message") == 'stop':
             raise StopIteration("Finished algorithm on demand")
 
+        for key in agentsActions:
+            print(f"Klucze {key}")
+
         print(f"Get action from data")
         for key in agentsActions:
-            output_value = nets[key].activate((0, 1, 0))
+            print(f"Klucze w środku {key}")
+            output_value = nets[key].activate((json_data[str(key)]['who'][0], json_data[str(key)]['distance'][0],
+                                               json_data[str(key)]['who'][1], json_data[str(key)]['distance'][1],
+                                               json_data[str(key)]['who'][2], json_data[str(key)]['distance'][2],
+                                               json_data[str(key)]['who'][3], json_data[str(key)]['distance'][3],
+                                               json_data[str(key)]['x'], json_data[str(key)]['y'],
+                                               json_data[str(key)]['lifeTime']))
             agentsActions[key] = output_value.index(max(output_value))
 
-        time.sleep(1)
+            for index, word in enumerate(generationMoves[(population.generation + 1)]):
+                generationMoves[(population.generation + 1)][word][whoISee(json_data[str(key)]['who'][index])][agentsActions[key]] += 1
+
+
+
+        #time.sleep(10)
 
         print(f"Send action to client")
         response = json.dumps(agentsActions)
@@ -352,7 +477,8 @@ def fitnessNEAT(genomes, config):
 
         print(f"Setting fitness")
         for key in json_data:
-            a_genomes[int(key)].fitness += json_data[key]['reward']
+            if json_data[key]['reward'] is not None:
+                a_genomes[int(key)].fitness += json_data[key]['reward']
 
         print(f"killing off the agents")
         for key in json_data:
@@ -360,8 +486,9 @@ def fitnessNEAT(genomes, config):
                 agentsActions.pop(int(key))
                 a_genomes.pop(int(key))
                 nets.pop(int(key))
+                causeOfDeath[json_data[key]['reason']] += 1
 
-                agentTimes.append(json_data[key]['lifeTime'])
+                agentTimes.append(json_data[key]['moveNumber'])
 
         print(f"Testing if all agents are dead")
 
@@ -376,6 +503,8 @@ def fitnessNEAT(genomes, config):
             if json_data.get("message") == 'stop':
                 raise StopIteration("Finished algorithm on demand")
 
+            timeOfSimulation = json_data['totalTime']
+
             break
         else:
             response = json.dumps({"action": "continue"})
@@ -389,6 +518,8 @@ def fitnessNEAT(genomes, config):
             if json_data.get("message") == 'stop':
                 raise StopIteration("Finished algorithm on demand")
 
+            timeOfSimulation = json_data['totalTime']
+
             print(f"Returned info: {json_data}")
 
     bestNEATGeneration = (population.generation + 1)
@@ -398,12 +529,13 @@ def fitnessNEAT(genomes, config):
     avarage = 0
 
     for i, (genome_id, genome) in enumerate(genomes):
-        avarage += genome.fitness
-        if least is None or genome.fitness < least:
-            least = genome.fitness
-        if most is None or genome.fitness > most:
-            fitestNEATAgent = genome
-            most = genome.fitness
+        if genome.fitness is not None:
+            avarage += genome.fitness
+            if least is None or genome.fitness < least:
+                least = genome.fitness
+            if most is None or genome.fitness > most:
+                fitestNEATAgent = genome
+                most = genome.fitness
 
     for i in nets:
         agentTimes.append(json_data['time'])
@@ -426,9 +558,13 @@ def fitnessNEAT(genomes, config):
     avg_cpu_data.append((sum(cpu_data) / len(cpu_data)))
     avg_memory_data.append((sum(memory_data) / len(memory_data)))
 
+    foodCause.append(causeOfDeath['food'])
+    enemyCause.append(causeOfDeath['enemy'])
+
     cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, "", "NEAT")
-    fitPloter(maxFit, maxFit, maxFit, "", "NEAT")
-    #timePloter(maxTime, minTime, avgTime, "", "NEAT")
+    fitPloter(maxFit, minFit, avgFit, "", "NEAT")
+    timePloter(maxTime, minTime, avgTime, "", "NEAT")
+    deathPloter(foodCause, enemyCause, "", "NEAT")
 
     if (population.generation+1) % 50 == 0 and fitestNEATAgent is not None:
         saveNEAT(folderName, bestNEATGeneration)
@@ -443,6 +579,10 @@ def saveNEAT(folderName, generationNumber):
     cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, full_path, "NEAT")
     fitPloter(maxFit, minFit, avgFit, full_path, "NEAT")
     timePloter(maxTime, minTime, avgTime, full_path, "NEAT")
+    deathPloter(foodCause, enemyCause, full_path, "NEAT")
+    decisionPoter(generationMoves, full_path, "NEAT", generationNumber)
+
+
 def saveDQN(folderName, generations):
     full_path = os.path.join(folderName, f"Generation_{generations}")
     os.makedirs(f"{full_path}", exist_ok=True)
@@ -450,7 +590,18 @@ def saveDQN(folderName, generations):
     cpuPloter(cpu_data, avg_cpu_data, memory_data, avg_memory_data, full_path, "DQN")
     fitPloter(maxFit, maxFit, maxFit, full_path, "DQN")
     timePloter(maxTime, maxTime, maxTime, full_path, "DQN")
-
+    movesPloter(calcMove, randMove, full_path, "DQN")
+    deathPloter(foodCause, enemyCause, full_path, "DQN")
+    decisionPoter(generationMoves, full_path, "DQN", generations)
+def whoISee(index):
+    if index == 0:
+        return "Nic"
+    if index == 1:
+        return "Jedzenie"
+    if index == 2:
+        return "Ściana"
+    if index == 3:
+        return "Drapieżnik"
 
 
 

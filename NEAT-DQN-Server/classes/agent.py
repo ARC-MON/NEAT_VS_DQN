@@ -14,8 +14,10 @@ class Agent:
         self.epsilon = 0
         self.gamma = 0.9
         self.memory = deque(maxlen=MAX_MEMORY)
-        self.model = model(3, 256, 4)
+        self.model = model(11, 256, 4)
         self.cumulativeReward = 0
+        self.randomMove = 0
+        self.calculatedMove = 0
 
         if existingNetwork is not None:
             print("Network exist")
@@ -56,10 +58,12 @@ class Agent:
         if random.randint(0, 200) < self.epsilon:
             move = random.randint(0, 3)
             final_move[move] = 1
+            self.randomMove += 1
         else:
             state0 = torch.tensor(state, dtype=torch.float)
             prediction = self.model(state0)
             move = torch.argmax(prediction).item()
             final_move[move] = 1
+            self.calculatedMove += 1
 
         return final_move
